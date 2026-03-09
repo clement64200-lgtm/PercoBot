@@ -24,7 +24,6 @@ async def refresh_ladder(guild: discord.Guild):
     rows = db.get_ladder(semaine, limit=10)
     now = datetime.now().strftime("%d/%m/%Y à %Hh%M")
 
-    # Construction de l'embed
     embed = discord.Embed(
         title=f"⚔️ LADDER PERCO — Semaine {semaine.split('-')[1]}",
         color=discord.Color.gold()
@@ -40,27 +39,22 @@ async def refresh_ladder(guild: discord.Guild):
                 member = guild.get_member(int(row['joueur_id']))
                 nom = member.display_name if member else f"Joueur {row['joueur_id'][:6]}"
             except:
-                nom = f"Joueur inconnu"
-            
+                nom = "Joueur inconnu"
             winrate = int(row['nb_victoires'] / row['nb_combats'] * 100) if row['nb_combats'] > 0 else 0
             classement += f"{medaille} **{nom}** — {row['points']} pts │ {row['nb_victoires']}V/{row['nb_defaites']}D │ {winrate}%\n"
-        
         embed.description = classement
 
     embed.set_footer(text=f"🔄 Mis à jour : {now} • Reset chaque lundi minuit")
 
-    # Récupérer l'ID du message ladder stocké
     ladder_msg_id = db.get_config("ladder_message_id")
-
     if ladder_msg_id:
         try:
             msg = await channel.fetch_message(int(ladder_msg_id))
             await msg.edit(embed=embed)
             return
         except:
-            pass  # Message supprimé, on en recrée un
+            pass
 
-    # Créer un nouveau message et épingler
     msg = await channel.send(embed=embed)
     await msg.pin()
     db.set_config("ladder_message_id", str(msg.id))
@@ -95,7 +89,6 @@ class BoutonsValidation(discord.ui.View):
         if not report:
             await interaction.response.send_message("❌ Report introuvable.", ephemeral=True)
             return
-
         if report["statut"] != "en_attente":
             await interaction.response.send_message("⚠️ Ce report a déjà été traité.", ephemeral=True)
             return
@@ -132,7 +125,6 @@ class BoutonsValidation(discord.ui.View):
             child.disabled = True
         await interaction.message.edit(embed=embed, view=self)
 
-        # Mise à jour du ladder en temps réel
         await refresh_ladder(interaction.guild)
 
         allies_mentions = " ".join([f"<@{a.strip()}>" for a in allies_ids if a.strip()])
@@ -204,7 +196,6 @@ class MotifRefus(discord.ui.Modal, title="Motif du refus"):
         for child in self.view_parent.children:
             child.disabled = True
         await self.message.edit(embed=embed, view=self.view_parent)
-
         await interaction.response.send_message(f"❌ Report refusé. Motif : *{self.motif.value}*", ephemeral=True)
 
 
@@ -224,7 +215,8 @@ class PercoCog(commands.Cog):
         nb_enemies="Nombre d'ennemis",
         allies="Tags Discord de tous les alliés présents (ex: @Joueur1 @Joueur2)",
         alliance_focus="L'ennemi était-il focus alliance ?",
-        screenshot="Screenshot du combat (optionnel)"
+        screenshot="1er screenshot du combat",
+        screenshot2="2ème screenshot du combat"
     )
     @app_commands.choices(
         type=[
@@ -253,14 +245,9 @@ class PercoCog(commands.Cog):
         nb_enemies: int,
         allies: str,
         alliance_focus: int,
-        screenshot: discord.Attachment = None
+        screenshot: discord.Attachment,
+        screenshot2: discord.Attachment
     ):
-        if db.get_config("screenshot_obligatoire") == "1" and not screenshot:
-            await interaction.response.send_message(
-                "⚠️ Un **screenshot** est obligatoire pour reporter un combat !", ephemeral=True
-            )
-            return
-
         allies_ids = []
         for word in allies.split():
             word = word.strip("<@!>")
@@ -273,7 +260,6 @@ class PercoCog(commands.Cog):
 
         nb_allies = len(allies_ids)
         semaine = get_semaine()
-
         points_preview = db.calculer_points(role, nb_allies, nb_enemies, resultat, bool(alliance_focus))
 
         conn = db.get_connection()
@@ -283,7 +269,7 @@ class PercoCog(commands.Cog):
         """, (
             reporter_id, type, role, alliance_focus,
             ",".join(allies_ids), nb_allies, nb_enemies,
-            resultat, screenshot.url if screenshot else None, semaine
+            resultat, screenshot.url, semaine
         ))
         report_id = cursor.lastrowid
         conn.commit()
@@ -292,7 +278,6 @@ class PercoCog(commands.Cog):
         type_emoji = "🏛️" if type == "perco" else "💎"
         role_emoji = "🛡️" if role == "defense" else "⚔️"
         resultat_emoji = "🏆" if resultat == "victoire" else "💀"
-
         allies_mentions = " ".join([f"<@{a}>" for a in allies_ids])
 
         embed = discord.Embed(
@@ -307,18 +292,23 @@ class PercoCog(commands.Cog):
         embed.add_field(name="⚔️ Ratio", value=f"{nb_allies}v{nb_enemies}", inline=True)
         embed.add_field(name="🎯 Points prévus", value=f"**{points_preview} pts**", inline=True)
         embed.add_field(name=f"👥 Alliés ({nb_allies})", value=allies_mentions, inline=False)
+        embed.add_field(name="🖼️ Screenshots", value=f"[Screen 1]({screenshot.url}) • [Screen 2]({screenshot2.url})", inline=False)
+        embed.set_image(url=screenshot.url)
         embed.set_footer(text=f"Reporté par {interaction.user.display_name}")
-
-        if screenshot:
-            embed.set_image(url=screenshot.url)
 
         channel_val_id = int(os.getenv("CHANNEL_VALIDATION", 0))
         channel_val = interaction.guild.get_channel(channel_val_id)
-
         view = BoutonsValidation(report_id=report_id)
 
         if channel_val:
+            # Envoi de l'embed principal avec screenshot 1
             msg = await channel_val.send(embed=embed, view=view)
+            # Envoi du screenshot 2 juste en dessous
+            embed2 = discord.Embed(color=discord.Color.orange())
+            embed2.set_image(url=screenshot2.url)
+            embed2.set_footer(text=f"Screenshot 2 — Report #{report_id}")
+            await channel_val.send(embed=embed2)
+
             conn = db.get_connection()
             conn.execute("UPDATE reports SET message_id = ? WHERE id = ?", (str(msg.id), report_id))
             conn.commit()
