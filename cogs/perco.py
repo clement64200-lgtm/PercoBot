@@ -6,30 +6,80 @@ import os
 import database as db
 
 def get_semaine() -> str:
-    """Retourne la semaine courante au format YYYY-WW."""
     now = datetime.now()
     return f"{now.year}-{now.strftime('%W')}"
 
 def get_medaille(position: int) -> str:
     medailles = {1: "🥇", 2: "🥈", 3: "🥉"}
-    return medailles.get(position, f"**#{position}**")
+    return medailles.get(position, f"#{position}")
+
+async def refresh_ladder(guild: discord.Guild):
+    """Met à jour le message ladder en temps réel."""
+    channel_ladder_id = int(os.getenv("CHANNEL_LADDER", 0))
+    channel = guild.get_channel(channel_ladder_id)
+    if not channel:
+        return
+
+    semaine = get_semaine()
+    rows = db.get_ladder(semaine, limit=10)
+    now = datetime.now().strftime("%d/%m/%Y à %Hh%M")
+
+    # Construction de l'embed
+    embed = discord.Embed(
+        title=f"⚔️ LADDER PERCO — Semaine {semaine.split('-')[1]}",
+        color=discord.Color.gold()
+    )
+
+    if not rows:
+        embed.description = "*Aucun combat enregistré cette semaine.*"
+    else:
+        classement = ""
+        for i, row in enumerate(rows, 1):
+            medaille = get_medaille(i)
+            try:
+                member = guild.get_member(int(row['joueur_id']))
+                nom = member.display_name if member else f"Joueur {row['joueur_id'][:6]}"
+            except:
+                nom = f"Joueur inconnu"
+            
+            winrate = int(row['nb_victoires'] / row['nb_combats'] * 100) if row['nb_combats'] > 0 else 0
+            classement += f"{medaille} **{nom}** — {row['points']} pts │ {row['nb_victoires']}V/{row['nb_defaites']}D │ {winrate}%\n"
+        
+        embed.description = classement
+
+    embed.set_footer(text=f"🔄 Mis à jour : {now} • Reset chaque lundi minuit")
+
+    # Récupérer l'ID du message ladder stocké
+    ladder_msg_id = db.get_config("ladder_message_id")
+
+    if ladder_msg_id:
+        try:
+            msg = await channel.fetch_message(int(ladder_msg_id))
+            await msg.edit(embed=embed)
+            return
+        except:
+            pass  # Message supprimé, on en recrée un
+
+    # Créer un nouveau message et épingler
+    msg = await channel.send(embed=embed)
+    await msg.pin()
+    db.set_config("ladder_message_id", str(msg.id))
 
 
 # ─── Boutons de validation officier ───────────────────────────────────────────
 
 class BoutonsValidation(discord.ui.View):
     def __init__(self, report_id: int):
-        super().__init__(timeout=None)  # Persist après redémarrage
+        super().__init__(timeout=None)
         self.report_id = report_id
 
     async def check_officier(self, interaction: discord.Interaction) -> bool:
-        """Vérifie que l'utilisateur est bien officier."""
         role_id = int(os.getenv("ROLE_OFFICIER", 0))
         role = interaction.guild.get_role(role_id)
         if role and role in interaction.user.roles:
             return True
         await interaction.response.send_message(
-            "❌ Tu dois être **Officier** pour valider les reports.", ephemeral=True
+            "❌ Tu dois être **Lieutenant** pour valider les reports.", ephemeral=True
         )
         return False
 
@@ -50,7 +100,6 @@ class BoutonsValidation(discord.ui.View):
             await interaction.response.send_message("⚠️ Ce report a déjà été traité.", ephemeral=True)
             return
 
-        # Calcul des points
         points = db.calculer_points(
             role=report["role"],
             nb_allies=report["nb_allies"],
@@ -59,7 +108,6 @@ class BoutonsValidation(discord.ui.View):
             alliance_focus=bool(report["alliance_focus"])
         )
 
-        # Mise à jour du statut
         conn = db.get_connection()
         conn.execute("""
             UPDATE reports SET statut = 'valide', points = ?, officier_id = ?
@@ -68,7 +116,6 @@ class BoutonsValidation(discord.ui.View):
         conn.commit()
         conn.close()
 
-        # Distribution des points à tous les alliés
         semaine = report["semaine"]
         victoire = report["resultat"] == "victoire"
         allies_ids = report["allies"].split(",")
@@ -77,27 +124,22 @@ class BoutonsValidation(discord.ui.View):
             if ally_id:
                 db.ajouter_points(ally_id, semaine, points, victoire)
 
-        # Mise à jour de l'embed
         embed = interaction.message.embeds[0]
         embed.color = discord.Color.green()
         embed.set_footer(text=f"✅ Validé par {interaction.user.display_name} | {points} pts distribués")
 
-        # Désactiver les boutons
         for child in self.children:
             child.disabled = True
         await interaction.message.edit(embed=embed, view=self)
 
-        # Annonce dans le channel ladder
-        channel_ladder_id = int(os.getenv("CHANNEL_LADDER", 0))
-        channel_ladder = interaction.guild.get_channel(channel_ladder_id)
+        # Mise à jour du ladder en temps réel
+        await refresh_ladder(interaction.guild)
 
         allies_mentions = " ".join([f"<@{a.strip()}>" for a in allies_ids if a.strip()])
-        type_emoji = "🏛️" if report["type"] == "perco" else "💎"
-        role_emoji = "🛡️" if report["role"] == "defense" else "⚔️"
         resultat_emoji = "🏆" if victoire else "💀"
 
         annonce = discord.Embed(
-            title=f"{resultat_emoji} Combat {report['type'].capitalize()} {report['role'].capitalize()} — {'Victoire' if victoire else 'Défaite'}",
+            title=f"{resultat_emoji} Combat validé — {report['type'].capitalize()} {report['role'].capitalize()}",
             color=discord.Color.gold() if victoire else discord.Color.red(),
             timestamp=datetime.now()
         )
@@ -106,6 +148,8 @@ class BoutonsValidation(discord.ui.View):
         annonce.add_field(name="⚡ Alliance Focus", value="Oui" if report["alliance_focus"] else "Non", inline=True)
         annonce.add_field(name="🎯 Points gagnés", value=f"**{points} pts**", inline=True)
 
+        channel_ladder_id = int(os.getenv("CHANNEL_LADDER", 0))
+        channel_ladder = interaction.guild.get_channel(channel_ladder_id)
         if channel_ladder:
             await channel_ladder.send(embed=annonce)
 
@@ -127,7 +171,6 @@ class BoutonsValidation(discord.ui.View):
             await interaction.response.send_message("⚠️ Ce report a déjà été traité.", ephemeral=True)
             return
 
-        # Ouvre un modal pour saisir le motif
         modal = MotifRefus(report_id=self.report_id, view_parent=self, message=interaction.message)
         await interaction.response.send_modal(modal)
 
@@ -212,21 +255,18 @@ class PercoCog(commands.Cog):
         alliance_focus: int,
         screenshot: discord.Attachment = None
     ):
-        # Vérification screenshot obligatoire
         if db.get_config("screenshot_obligatoire") == "1" and not screenshot:
             await interaction.response.send_message(
                 "⚠️ Un **screenshot** est obligatoire pour reporter un combat !", ephemeral=True
             )
             return
 
-        # Extraire les IDs des alliés mentionnés
         allies_ids = []
         for word in allies.split():
             word = word.strip("<@!>")
             if word.isdigit():
                 allies_ids.append(word)
 
-        # Toujours inclure le reporter
         reporter_id = str(interaction.user.id)
         if reporter_id not in allies_ids:
             allies_ids.insert(0, reporter_id)
@@ -234,10 +274,8 @@ class PercoCog(commands.Cog):
         nb_allies = len(allies_ids)
         semaine = get_semaine()
 
-        # Calcul des points prévisionnels
         points_preview = db.calculer_points(role, nb_allies, nb_enemies, resultat, bool(alliance_focus))
 
-        # Sauvegarde en base
         conn = db.get_connection()
         cursor = conn.execute("""
             INSERT INTO reports (reporter_id, type, role, alliance_focus, allies, nb_allies, nb_enemies, resultat, screenshot_url, semaine)
@@ -251,11 +289,9 @@ class PercoCog(commands.Cog):
         conn.commit()
         conn.close()
 
-        # Construction de l'embed de validation
         type_emoji = "🏛️" if type == "perco" else "💎"
         role_emoji = "🛡️" if role == "defense" else "⚔️"
         resultat_emoji = "🏆" if resultat == "victoire" else "💀"
-        focus_emoji = "⚡" if alliance_focus else "—"
 
         allies_mentions = " ".join([f"<@{a}>" for a in allies_ids])
 
@@ -276,7 +312,6 @@ class PercoCog(commands.Cog):
         if screenshot:
             embed.set_image(url=screenshot.url)
 
-        # Envoi dans le channel de validation
         channel_val_id = int(os.getenv("CHANNEL_VALIDATION", 0))
         channel_val = interaction.guild.get_channel(channel_val_id)
 
@@ -290,32 +325,13 @@ class PercoCog(commands.Cog):
             conn.close()
 
         await interaction.response.send_message(
-            f"✅ Report **#{report_id}** soumis ! Un officier va le valider.", ephemeral=True
+            f"✅ Report **#{report_id}** soumis ! Un Lieutenant va le valider.", ephemeral=True
         )
 
     @perco_group.command(name="ladder", description="Affiche le classement de la semaine")
     async def ladder(self, interaction: discord.Interaction):
-        semaine = get_semaine()
-        rows = db.get_ladder(semaine)
-
-        if not rows:
-            await interaction.response.send_message("📭 Aucun combat enregistré cette semaine !", ephemeral=True)
-            return
-
-        embed = discord.Embed(
-            title="🏆 Ladder Perco — Semaine en cours",
-            color=discord.Color.gold(),
-            timestamp=datetime.now()
-        )
-
-        classement = ""
-        for i, row in enumerate(rows, 1):
-            medaille = get_medaille(i)
-            classement += f"{medaille} <@{row['joueur_id']}> — **{row['points']} pts** ({row['nb_victoires']}V/{row['nb_defaites']}D)\n"
-
-        embed.description = classement
-        embed.set_footer(text=f"Semaine {semaine} • Reset chaque lundi")
-        await interaction.response.send_message(embed=embed)
+        await refresh_ladder(interaction.guild)
+        await interaction.response.send_message("✅ Ladder mis à jour !", ephemeral=True)
 
     @perco_group.command(name="stats", description="Affiche les stats d'un joueur")
     @app_commands.describe(joueur="Le joueur dont tu veux voir les stats")
