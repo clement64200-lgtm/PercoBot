@@ -8,7 +8,7 @@ from datetime import datetime
 import database as db
 
 # Fix chemin pour Railway
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insertos.chdir(os.path.dirname(os.path.abspath(__file__)))
 
 # Chargement des variables d'environnement
 load_dotenv()
