@@ -2,8 +2,9 @@ import sys
 import os
 
 # Fix chemin pour Railway
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-os.chdir(os.path.dirname(os.path.abspath(__file__)))
+APP_DIR = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, APP_DIR)
+os.chdir(APP_DIR)
 
 import discord
 from discord.ext import commands
@@ -72,6 +73,9 @@ async def reset_hebdo():
 @bot.event
 async def on_ready():
     print(f"✅ {bot.user.name} est en ligne !")
+    print(f"📁 Répertoire courant : {os.getcwd()}")
+    print(f"📁 Contenu : {os.listdir('.')}")
+    print(f"📁 Contenu cogs : {os.listdir('cogs') if os.path.exists('cogs') else 'DOSSIER INTROUVABLE'}")
 
     await bot.load_extension("cogs.perco")
     await bot.load_extension("cogs.config")
