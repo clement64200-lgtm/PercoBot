@@ -153,7 +153,18 @@ class ConfirmReset(discord.ui.View):
         conn.commit()
         conn.close()
 
-        # Reset l'ID du message ladder pour forcer la création d'un nouveau
+        # Supprimer l'ancien message ladder
+        import os
+        ladder_msg_id = db.get_config("ladder_message_id")
+        if ladder_msg_id:
+            try:
+                channel_ladder_id = int(os.getenv("CHANNEL_LADDER", 0))
+                channel = interaction.guild.get_channel(channel_ladder_id)
+                if channel:
+                    old_msg = await channel.fetch_message(int(ladder_msg_id))
+                    await old_msg.delete()
+            except:
+                pass
         db.set_config("ladder_message_id", "")
 
         for child in self.children:

@@ -47,7 +47,7 @@ async def refresh_ladder(guild: discord.Guild):
     embed.set_footer(text=f"🔄 Mis à jour : {now} • Reset chaque lundi minuit")
 
     ladder_msg_id = db.get_config("ladder_message_id")
-    if ladder_msg_id:
+    if ladder_msg_id and ladder_msg_id.strip():
         try:
             msg = await channel.fetch_message(int(ladder_msg_id))
             await msg.edit(embed=embed)
@@ -56,7 +56,10 @@ async def refresh_ladder(guild: discord.Guild):
             pass
 
     msg = await channel.send(embed=embed)
-    await msg.pin()
+    try:
+        await msg.pin()
+    except:
+        pass  # Pas de permission d'épingler, on continue quand même
     db.set_config("ladder_message_id", str(msg.id))
 
 
@@ -117,13 +120,13 @@ class BoutonsValidation(discord.ui.View):
             if ally_id:
                 db.ajouter_points(ally_id, semaine, points, victoire)
 
-        embed = interaction.message.embeds[0]
-        embed.color = discord.Color.green()
-        embed.set_footer(text=f"✅ Validé par {interaction.user.display_name} | {points} pts distribués")
+        embeds = interaction.message.embeds
+        embeds[0].color = discord.Color.green()
+        embeds[0].set_footer(text=f"✅ Validé par {interaction.user.display_name} | {points} pts distribués")
 
         for child in self.children:
             child.disabled = True
-        await interaction.message.edit(embed=embed, view=self)
+        await interaction.message.edit(embeds=embeds, view=self)
 
         await refresh_ladder(interaction.guild)
 
@@ -189,13 +192,13 @@ class MotifRefus(discord.ui.Modal, title="Motif du refus"):
         conn.commit()
         conn.close()
 
-        embed = self.message.embeds[0]
-        embed.color = discord.Color.red()
-        embed.set_footer(text=f"❌ Refusé par {interaction.user.display_name} — {self.motif.value}")
+        embeds = self.message.embeds
+        embeds[0].color = discord.Color.red()
+        embeds[0].set_footer(text=f"❌ Refusé par {interaction.user.display_name} — {self.motif.value}")
 
         for child in self.view_parent.children:
             child.disabled = True
-        await self.message.edit(embed=embed, view=self.view_parent)
+        await self.message.edit(embeds=embeds, view=self.view_parent)
         await interaction.response.send_message(f"❌ Report refusé. Motif : *{self.motif.value}*", ephemeral=True)
 
 
