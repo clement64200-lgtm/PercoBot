@@ -51,15 +51,18 @@ async def refresh_ladder(guild: discord.Guild):
         try:
             msg = await channel.fetch_message(int(ladder_msg_id))
             await msg.edit(embed=embed)
-            return
-        except:
-            pass
+            return  # Message trouvé et édité, on s'arrête là
+        except discord.NotFound:
+            pass  # Message supprimé, on en recrée un
+        except Exception:
+            return  # Autre erreur, on ne crée pas de doublon
 
+    # Créer un nouveau message uniquement si aucun existant
     msg = await channel.send(embed=embed)
     try:
         await msg.pin()
     except:
-        pass  # Pas de permission d'épingler, on continue quand même
+        pass
     db.set_config("ladder_message_id", str(msg.id))
 
 
