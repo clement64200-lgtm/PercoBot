@@ -292,22 +292,22 @@ class PercoCog(commands.Cog):
         embed.add_field(name="⚔️ Ratio", value=f"{nb_allies}v{nb_enemies}", inline=True)
         embed.add_field(name="🎯 Points prévus", value=f"**{points_preview} pts**", inline=True)
         embed.add_field(name=f"👥 Alliés ({nb_allies})", value=allies_mentions, inline=False)
-        embed.add_field(name="🖼️ Screenshots", value=f"[Screen 1]({screenshot.url}) • [Screen 2]({screenshot2.url})", inline=False)
-        embed.set_image(url=screenshot.url)
         embed.set_footer(text=f"Reporté par {interaction.user.display_name}")
+
+        # Embed screenshot 1
+        embed_s1 = discord.Embed(color=discord.Color.orange())
+        embed_s1.set_image(url=screenshot.url)
+
+        # Embed screenshot 2
+        embed_s2 = discord.Embed(color=discord.Color.orange())
+        embed_s2.set_image(url=screenshot2.url)
 
         channel_val_id = int(os.getenv("CHANNEL_VALIDATION", 0))
         channel_val = interaction.guild.get_channel(channel_val_id)
         view = BoutonsValidation(report_id=report_id)
 
         if channel_val:
-            # Envoi de l'embed principal avec screenshot 1
-            msg = await channel_val.send(embed=embed, view=view)
-            # Envoi du screenshot 2 juste en dessous
-            embed2 = discord.Embed(color=discord.Color.orange())
-            embed2.set_image(url=screenshot2.url)
-            embed2.set_footer(text=f"Screenshot 2 — Report #{report_id}")
-            await channel_val.send(embed=embed2)
+            msg = await channel_val.send(embeds=[embed, embed_s1, embed_s2], view=view)
 
             conn = db.get_connection()
             conn.execute("UPDATE reports SET message_id = ? WHERE id = ?", (str(msg.id), report_id))
