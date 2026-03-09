@@ -260,10 +260,6 @@ class PercoCog(commands.Cog):
             if word.isdigit():
                 allies_ids.append(word)
 
-        reporter_id = str(interaction.user.id)
-        if reporter_id not in allies_ids:
-            allies_ids.insert(0, reporter_id)
-
         nb_allies = len(allies_ids)
         semaine = get_semaine()
         points_preview = db.calculer_points(role, nb_allies, nb_enemies, resultat, bool(alliance_focus))
