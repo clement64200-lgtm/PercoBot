@@ -1,14 +1,16 @@
 import sys
 import os
+
+# Fix chemin pour Railway
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
+
 import discord
 from discord.ext import commands
 from dotenv import load_dotenv
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from datetime import datetime
 import database as db
-
-# Fix chemin pour Railway
-sys.path.insertos.chdir(os.path.dirname(os.path.abspath(__file__)))
 
 # Chargement des variables d'environnement
 load_dotenv()
@@ -62,7 +64,6 @@ async def reset_hebdo():
 
     embed.set_footer(text="Nouveau ladder démarré ! Bonne chance à tous ⚔️")
     await channel.send("@everyone", embed=embed)
-
     print(f"✅ Reset hebdomadaire effectué — semaine {semaine_precedente}")
 
 
