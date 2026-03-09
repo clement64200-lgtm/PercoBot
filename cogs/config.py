@@ -148,24 +148,32 @@ class ConfirmReset(discord.ui.View):
 
     @discord.ui.button(label="✅ Confirmer le reset", style=discord.ButtonStyle.danger)
     async def confirmer(self, interaction: discord.Interaction, button: discord.ui.Button):
+        import os
+        from datetime import datetime
+
         conn = db.get_connection()
         conn.execute("DELETE FROM ladder WHERE semaine = ?", (self.semaine,))
         conn.commit()
         conn.close()
 
-        # Supprimer l'ancien message ladder
-        import os
+        # Mettre à jour le message ladder pour afficher vide
         ladder_msg_id = db.get_config("ladder_message_id")
-        if ladder_msg_id:
+        if ladder_msg_id and ladder_msg_id.strip():
             try:
                 channel_ladder_id = int(os.getenv("CHANNEL_LADDER", 0))
                 channel = interaction.guild.get_channel(channel_ladder_id)
                 if channel:
                     old_msg = await channel.fetch_message(int(ladder_msg_id))
-                    await old_msg.delete()
+                    now = datetime.now().strftime("%d/%m/%Y à %Hh%M")
+                    embed = discord.Embed(
+                        title=f"⚔️ LADDER PERCO — Semaine {self.semaine.split("-")[1]}",
+                        description="*Aucun combat enregistré cette semaine.*",
+                        color=discord.Color.gold()
+                    )
+                    embed.set_footer(text=f"🔄 Mis à jour : {now} • Reset chaque lundi minuit")
+                    await old_msg.edit(embed=embed)
             except:
-                pass
-        db.set_config("ladder_message_id", "")
+                db.set_config("ladder_message_id", "")
 
         for child in self.children:
             child.disabled = True
