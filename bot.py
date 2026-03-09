@@ -87,6 +87,8 @@ async def on_ready():
     print(f"✅ {bot.user.name} est en ligne !")
 
     # Chargement des cogs
+     import sys, os
+    sys.path.insert(0, os.path.dirname(__file__))
     await bot.load_extension("cogs.perco")
     await bot.load_extension("cogs.config")
     print("✅ Cogs chargés.")
