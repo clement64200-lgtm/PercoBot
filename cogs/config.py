@@ -117,5 +117,61 @@ class ConfigCog(commands.Cog):
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
+    @config_group.command(name="reset_ladder", description="Reset manuel du ladder (Admin uniquement)")
+    @app_commands.describe(semaine="Semaine à reset (format YYYY-WW) ou vide pour la semaine courante")
+    async def reset_ladder(self, interaction: discord.Interaction, semaine: str = None):
+        if str(interaction.user.id) != "402234653404168193":
+            await interaction.response.send_message("❌ Réservé à l'administrateur du bot.", ephemeral=True)
+            return
+
+        from datetime import datetime
+        if not semaine:
+            now = datetime.now()
+            semaine = f"{now.year}-{now.strftime('%W')}"
+
+        # Confirmation avant reset
+        view = ConfirmReset(semaine=semaine, officier=interaction.user)
+        embed = discord.Embed(
+            title="⚠️ Confirmation de reset",
+            description=f"Tu es sur le point de **supprimer tous les points** de la semaine .",
+            color=discord.Color.yellow()
+        )
+        embed.set_footer(text="Cette action est irréversible !")
+        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+
+
+class ConfirmReset(discord.ui.View):
+    def __init__(self, semaine: str, officier: discord.Member):
+        super().__init__(timeout=30)
+        self.semaine = semaine
+        self.officier = officier
+
+    @discord.ui.button(label="✅ Confirmer le reset", style=discord.ButtonStyle.danger)
+    async def confirmer(self, interaction: discord.Interaction, button: discord.ui.Button):
+        conn = db.get_connection()
+        conn.execute("DELETE FROM ladder WHERE semaine = ?", (self.semaine,))
+        conn.commit()
+        conn.close()
+
+        # Reset l'ID du message ladder pour forcer la création d'un nouveau
+        db.set_config("ladder_message_id", "")
+
+        for child in self.children:
+            child.disabled = True
+
+        embed = discord.Embed(
+            title="✅ Ladder resetté !",
+            description=f"Tous les points de la semaine  ont été supprimés.",
+            color=discord.Color.green()
+        )
+        await interaction.response.edit_message(embed=embed, view=self)
+
+    @discord.ui.button(label="❌ Annuler", style=discord.ButtonStyle.secondary)
+    async def annuler(self, interaction: discord.Interaction, button: discord.ui.Button):
+        for child in self.children:
+            child.disabled = True
+        await interaction.response.edit_message(content="❌ Reset annulé.", embed=None, view=self)
+
+
 async def setup(bot: commands.Bot):
     await bot.add_cog(ConfigCog(bot))
