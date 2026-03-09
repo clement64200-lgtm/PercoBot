@@ -1,10 +1,14 @@
+import sys
+import os
 import discord
 from discord.ext import commands
 from dotenv import load_dotenv
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from datetime import datetime
-import os
 import database as db
+
+# Fix chemin pour Railway
+sys.path.insert(0, os.path.dirname(__file__))
 
 # Chargement des variables d'environnement
 load_dotenv()
@@ -27,12 +31,10 @@ scheduler = AsyncIOScheduler()
 # ─── Reset hebdomadaire ────────────────────────────────────────────────────────
 
 async def reset_hebdo():
-    """Effectue le reset hebdomadaire et annonce les résultats."""
     guild = bot.get_guild(GUILD_ID)
     if not guild:
         return
 
-    # Récupérer la semaine qui vient de se terminer
     now = datetime.now()
     semaine_precedente = f"{now.year}-{int(now.strftime('%W')) - 1:02d}"
     rows = db.get_ladder(semaine_precedente, limit=3)
@@ -61,22 +63,6 @@ async def reset_hebdo():
     embed.set_footer(text="Nouveau ladder démarré ! Bonne chance à tous ⚔️")
     await channel.send("@everyone", embed=embed)
 
-    # Attribution du rôle Défenseur de la semaine au 1er
-    if rows:
-        role_def_id = int(os.getenv("ROLE_DEFENSEUR", 0))
-        role_def = guild.get_role(role_def_id)
-
-        if role_def:
-            # Retirer le rôle à l'ancien
-            for member in guild.members:
-                if role_def in member.roles:
-                    await member.remove_roles(role_def)
-
-            # Attribuer au nouveau
-            winner = guild.get_member(int(rows[0]["joueur_id"]))
-            if winner:
-                await winner.add_roles(role_def)
-
     print(f"✅ Reset hebdomadaire effectué — semaine {semaine_precedente}")
 
 
@@ -86,20 +72,15 @@ async def reset_hebdo():
 async def on_ready():
     print(f"✅ {bot.user.name} est en ligne !")
 
-    # Chargement des cogs
-     import sys, os
-    sys.path.insert(0, os.path.dirname(__file__))
     await bot.load_extension("cogs.perco")
     await bot.load_extension("cogs.config")
     print("✅ Cogs chargés.")
 
-    # Synchronisation des commandes slash
     guild = discord.Object(id=GUILD_ID)
     bot.tree.copy_global_to(guild=guild)
     synced = await bot.tree.sync(guild=guild)
     print(f"✅ {len(synced)} commandes slash synchronisées.")
 
-    # Planification du reset chaque lundi à 00h00
     scheduler.add_job(reset_hebdo, "cron", day_of_week="mon", hour=0, minute=0)
     scheduler.start()
     print("✅ Scheduler démarré (reset lundi 00h00).")
